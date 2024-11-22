@@ -3,49 +3,74 @@ const multer = require("multer");
 const cors = require("cors");
 const docxToPDF = require("docx-pdf");
 const path = require("path");
+const { exec } = require("child_process");
 
 const app = express();
 const port = 7000;
 
 app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// settting up the file storage
 const storage = multer.diskStorage({
-    destination: function(req, file, cb) {
+    destination: function (req, file, cb) {
         cb(null, "uploads");
     },
-    filename: function(req, file, cb) {
+    filename: function (req, file, cb) {
         cb(null, file.originalname);
     },
 });
 
 const upload = multer({ storage: storage });
+
 app.post("/convertFile", upload.single("file"), (req, res, next) => {
     try {
         if (!req.file) {
             return res.status(400).json({
-                message: "No file  uploaded",
+                message: "No file uploaded",
             });
         }
-        // Defining output file path
-        let outoutPath = path.join(
+
+        const outputPath = path.join(__dirname, "files", `${req.file.originalname}.pdf`);
+        const finalOutputPath = path.join(
             __dirname,
             "files",
-            `${req.file.originalname}.pdf`
+            `${req.file.originalname}-final.pdf`
         );
-        docxToPDF(req.file.path, outoutPath, (err, result) => {
+
+        docxToPDF(req.file.path, outputPath, (err, result) => {
             if (err) {
-                console.log(err);
+                console.error(err);
                 return res.status(500).json({
-                    message: "Error converting docx to pdf",
+                    message: "Error converting DOCX to PDF",
                 });
             }
-            res.download(outoutPath, () => {
-                console.log("file downloaded");
-            });
+
+            const password = req.body.password;
+
+            if (password) {
+                const qpdfCommand = `qpdf --encrypt ${password} ${password} 256 -- "${outputPath}" "${finalOutputPath}"`;
+
+                exec(qpdfCommand, (err, stdout, stderr) => {
+                    if (err) {
+                        console.error(stderr);
+                        return res.status(500).json({
+                            message: "Error adding password protection",
+                        });
+                    }
+
+                    res.download(finalOutputPath, () => {
+                        console.log("Password-protected file downloaded");
+                    });
+                });
+            } else {
+                res.download(outputPath, () => {
+                    console.log("Unprotected file downloaded");
+                });
+            }
         });
     } catch (error) {
-        console.log(error);
+        console.error(error);
         res.status(500).json({
             message: "Internal server error",
         });
